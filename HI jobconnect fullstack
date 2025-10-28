@@ -1,0 +1,464 @@
+HLJob Connect — Fullstack Starter (Frontend + Express backend)
+
+This document contains a ready-to-use fullstack project you can copy into a GitHub repo and deploy to Render, Railway, or Replit. It includes a static front-end (index.html + app.js) and a Node/Express backend with optional MongoDB integration.
+
+
+---
+
+Project structure (paste these files into a project folder)
+
+hljobconnect/
+├─ backend/
+│  ├─ package.json
+│  ├─ server.js
+│  ├─ .env.example
+│  └─ README_BACKEND.md
+├─ frontend/
+│  ├─ index.html
+│  ├─ styles.css
+│  └─ app.js
+└─ README.md
+
+
+---
+
+backend/package.json
+
+{
+  "name": "hljobconnect-backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "mongodb": "^5.7.0",
+    "dotenv": "^16.3.1",
+    "body-parser": "^1.20.2"
+  }
+}
+
+
+---
+
+backend/.env.example
+
+# If you want to use MongoDB Atlas, set MONGO_URI. If left blank the server will use in-memory store.
+MONGO_URI=
+PORT=4000
+
+
+---
+
+backend/server.js
+
+// Simple Node/Express backend for HLJob Connect
+const express = require('express');
+const cors = require('cors');
+const bodyParser = require('body-parser');
+const dotenv = require('dotenv');
+
+dotenv.config();
+const app = express();
+app.use(cors());
+app.use(bodyParser.json());
+
+const PORT = process.env.PORT || 4000;
+
+// In-memory data fallback
+let jobs = [
+  {
+    id: 1,
+    title: 'Marketing Intern',
+    location: 'Addis Ababa, Ethiopia',
+    type: 'Internship',
+    description: 'Support digital marketing and social media campaigns.'
+  },
+  {
+    id: 2,
+    title: 'Junior Data Analyst',
+    location: 'Remote',
+    type: 'Full-time',
+    description: 'Analyze household survey data and create dashboards.'
+  }
+];
+
+let applications = [];
+
+// Optional MongoDB integration
+const { MongoClient, ObjectId } = require('mongodb');
+let dbClient = null;
+let jobsCollection = null;
+let appsCollection = null;
+
+async function connectDB() {
+  const uri = process.env.MONGO_URI;
+  if (!uri) {
+    console.log('No MONGO_URI provided — using in-memory store');
+    return;
+  }
+  try {
+    dbClient = new MongoClient(uri);
+    await dbClient.connect();
+    const db = dbClient.db(process.env.DB_NAME || 'hljobconnect');
+    jobsCollection = db.collection('jobs');
+    appsCollection = db.collection('applications');
+    console.log('Connected to MongoDB');
+
+    // Ensure some sample jobs exist if collection empty
+    const count = await jobsCollection.countDocuments();
+    if (count === 0) {
+      await jobsCollection.insertMany(jobs);
+    }
+  } catch (err) {
+    console.error('MongoDB connect error:', err.message);
+  }
+}
+
+connectDB();
+
+// Helper to get jobs (from DB if available)
+async function getJobsFromStore() {
+  if (jobsCollection) {
+    return await jobsCollection.find().toArray();
+  }
+  return jobs;
+}
+
+// Helper to add application
+async function addApplication(appObj) {
+  if (appsCollection) {
+    const res = await appsCollection.insertOne(appObj);
+    return res.insertedId;
+  }
+  applications.push(appObj);
+  return applications.length - 1;
+}
+
+// Routes
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', env: { useMongo: !!process.env.MONGO_URI } });
+});
+
+app.get('/api/jobs', async (req, res) => {
+  try {
+    const allJobs = await getJobsFromStore();
+    res.json({ success: true, jobs: allJobs });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/jobs/:id', async (req, res) => {
+  const id = req.params.id;
+  try {
+    if (jobsCollection) {
+      const job = await jobsCollection.findOne({ _id: new ObjectId(id) });
+      return res.json({ success: true, job });
+    }
+    const job = jobs.find(j => String(j.id) === String(id) || String(j._id) === String(id));
+    res.json({ success: true, job });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/apply', async (req, res) => {
+  const { jobId, name, email, cvLink, message } = req.body;
+  if (!jobId || !name || !email) {
+    return res.status(400).json({ success: false, error: 'jobId, name and email are required' });
+  }
+  const application = {
+    jobId,
+    name,
+    email,
+    cvLink: cvLink || '',
+    message: message || '',
+    appliedAt: new Date()
+  };
+  try {
+    const id = await addApplication(application);
+    res.json({ success: true, id });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Serve static frontend if needed when deployed together
+const path = require('path');
+app.use(express.static(path.join(__dirname, '..', 'frontend')));
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'frontend', 'index.html'));
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+
+
+---
+
+backend/README_BACKEND.md
+
+# Backend
+
+- To run locally:
+  1. cd backend
+  2. copy .env.example to .env and set MONGO_URI if using MongoDB
+  3. npm install
+  4. npm start
+
+- Endpoints:
+  GET /api/health
+  GET /api/jobs
+  GET /api/jobs/:id
+  POST /api/apply  { jobId, name, email, cvLink?, message? }
+
+
+---
+
+frontend/index.html
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HLJob Connect</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="logo">HLJob Connect</h1>
+      <nav class="main-nav">
+        <a href="#home">Home</a>
+        <a href="#about">About</a>
+        <a href="#jobs">Jobs</a>
+        <a href="#impact">Impact</a>
+        <a href="#contact">Contact</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section id="home" class="hero">
+      <div class="container">
+        <h2>Connecting Youth and Opportunities for a Better Future</h2>
+        <p>HLJob Connect is dedicated to SDG 8 — Decent Work and Economic Growth. Explore jobs, training and entrepreneurship opportunities across Africa.</p>
+        <button id="exploreJobsBtn">Explore Opportunities</button>
+      </div>
+    </section>
+
+    <section id="about" class="section">
+      <div class="container">
+        <h3>About HLJob Connect</h3>
+        <p>We connect job seekers, employers and training providers to promote inclusive economic growth and decent work. Our focus is youth employment, women empowerment and entrepreneurship support.</p>
+      </div>
+    </section>
+
+    <section id="jobs" class="section">
+      <div class="container">
+        <h3>Job Opportunities</h3>
+        <div id="jobsList">Loading jobs...</div>
+      </div>
+    </section>
+
+    <section id="impact" class="section">
+      <div class="container">
+        <h3>Impact & Success Stories</h3>
+        <p>We have connected hundreds of youth with internships, jobs and training programs.</p>
+      </div>
+    </section>
+
+    <section id="contact" class="section">
+      <div class="container">
+        <h3>Contact Us</h3>
+        <form id="applyForm">
+          <label>Name<input name="name" required></label>
+          <label>Email<input name="email" type="email" required></label>
+          <label>Job ID<input name="jobId" required></label>
+          <label>CV Link<input name="cvLink"></label>
+          <label>Message<textarea name="message"></textarea></label>
+          <button type="submit">Apply</button>
+        </form>
+        <div id="applyResult"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">HLJob Connect • Supporting SDG 8 • hljobconnect@gmail.com</div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
+
+
+---
+
+frontend/styles.css
+
+:root{--green:#28a745;--blue:#007bff;--orange:#f39c12}
+*{box-sizing:border-box}
+body{font-family:Arial,Helvetica,sans-serif;margin:0;color:#222}
+.container{max-width:1000px;margin:0 auto;padding:20px}
+.site-header{background:#fff;box-shadow:0 1px 4px rgba(0,0,0,0.06);position:sticky;top:0;z-index:10}
+.site-header .container{display:flex;align-items:center;justify-content:space-between}
+.main-nav a{margin-left:16px;text-decoration:none;color:#333}
+.hero{background:linear-gradient(90deg,rgba(40,167,69,0.08),rgba(0,123,255,0.06));padding:60px 0;text-align:center}
+.hero h2{margin:0 0 10px;color:var(--green)}
+.section{padding:40px 0}
+#jobsList{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.jobCard{border:1px solid #e6e6e6;padding:12px;border-radius:8px}
+.jobCard h4{margin:0 0 6px}
+.site-footer{background:#f8f9fa;padding:12px;text-align:center}
+button{background:var(--blue);color:white;border:none;padding:10px 14px;border-radius:6px;cursor:pointer}
+form label{display:block;margin-bottom:8px}
+input,textarea{width:100%;padding:8px;margin-top:6px}
+
+
+---
+
+frontend/app.js
+
+const API_BASE = (window.location.hostname === 'localhost') ? 'http://localhost:4000' : window.location.origin;
+
+async function fetchJobs(){
+  const res = await fetch(API_BASE + '/api/jobs');
+  const data = await res.json();
+  if (data.success){
+    renderJobs(data.jobs);
+  } else {
+    document.getElementById('jobsList').innerText = 'Unable to load jobs.';
+  }
+}
+
+function renderJobs(jobs){
+  const container = document.getElementById('jobsList');
+  container.innerHTML = '';
+  jobs.forEach(job => {
+    const div = document.createElement('div');
+    div.className = 'jobCard';
+    div.innerHTML = `
+      <h4>${job.title}</h4>
+      <div>${job.location} • ${job.type || ''}</div>
+      <p>${job.description || ''}</p>
+      <button class="applyBtn" data-id="${job._id || job.id}">Apply</button>
+    `;
+    container.appendChild(div);
+  });
+  // attach listeners
+  document.querySelectorAll('.applyBtn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelector('input[name="jobId"]').value = btn.dataset.id;
+      window.location.hash = '#contact';
+    });
+  });
+}
+
+// Form submit
+document.getElementById('applyForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const payload = {
+    jobId: form.jobId.value,
+    name: form.name.value,
+    email: form.email.value,
+    cvLink: form.cvLink.value,
+    message: form.message.value
+  };
+  try {
+    const res = await fetch(API_BASE + '/api/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (data.success){
+      document.getElementById('applyResult').innerText = 'Application submitted — thank you!';
+      form.reset();
+    } else {
+      document.getElementById('applyResult').innerText = 'Error: ' + (data.error || 'Unable to submit');
+    }
+  } catch (err) {
+    document.getElementById('applyResult').innerText = 'Network error — try again later.';
+  }
+});
+
+// Explore Jobs button
+document.getElementById('exploreJobsBtn').addEventListener('click', () => {
+  window.location.hash = '#jobs';
+});
+
+// Initial load
+fetchJobs();
+
+
+---
+
+README.md (top-level)
+
+# HLJob Connect — Fullstack Starter
+
+This is a simple fullstack starter project for HLJob Connect: a static frontend + Node/Express backend with optional MongoDB support.
+
+## How to run locally
+
+1. Open two terminals.
+
+2. Backend:
+   - cd backend
+   - npm install
+   - copy .env.example to .env and set MONGO_URI if you want MongoDB
+   - npm start
+
+3. Frontend (optional if backend serves static files):
+   - cd frontend
+   - open index.html in browser
+
+## Deploy
+- Recommended: Render.com for backend and static site hosting, or deploy the combined repo so Express serves the frontend.
+- If using Render: create a web service from the backend folder, set environment variables (MONGO_URI, PORT).
+
+
+---
+
+Deployment guidance (short)
+
+1. MongoDB Atlas (optional):
+
+Create a free cluster, create a database user, copy the connection string.
+
+Paste into backend/.env as MONGO_URI.
+
+
+
+2. Deploy to Render (example):
+
+Create a new Web Service -> connect to your GitHub repo -> set build command npm install and start command npm start.
+
+Add environment variables (MONGO_URI).
+
+
+
+3. Test the live URL: open https://<your-service>.onrender.com — the frontend will be served and API endpoints available at /api/*.
+
+
+
+
+---
+
+Good luck! Paste this project into a GitHub repo and follow the deployment steps above. If you want, I can now:
+
+(A) Create a ready-to-paste GitHub repo file contents in this canvas, or
+
+(B) Give you exact Render / Railway / Vercel deployment step-by-step commands with screenshots, or
+
+(C) Walk you through deploying it live while you run the commands.
+
+
+Tell me which one you want next.
